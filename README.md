@@ -25,3 +25,27 @@ cd ..
   * **2014 Test images [41K/6GB]** (extract the test2014 folder and place at location cocoapi/images/test2014/)
 
 4. The project is structured as a series of Jupyter notebooks that are designed to be completed in sequential order (`0_Dataset.ipynb, 1_Preliminaries.ipynb, 2_Training.ipynb, 3_Inference.ipynb`).
+
+# Notebooks
+
+**Notebook 0**
+1. Initialize the COCO API
+2. Plot a Sample Image
+
+**Notebook 1**
+1. Explore the Data Loader
+2. Use the Data Loader to Obtain Batches
+3. Experiment with the CNN Encoder
+4. Implement the RNN Decoder
+
+**Notebook 2**
+1. Training Setup
+2. Train the Model
+3. Validate the Model
+
+**Notebook 2**
+1. Get Data Loader for Test Dataset
+2. Load Trained Models
+3. Finish the Sampler
+4. Clean up the Captions
+5. Generate Predictions
