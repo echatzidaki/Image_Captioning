@@ -28,22 +28,22 @@ cd ..
 
 # Notebooks
 
-**Notebook 0**
+**Notebook 0: Dataset**
 1. Initialize the COCO API
 2. Plot a Sample Image
 
-**Notebook 1**
+**Notebook 1: Preliminaries**
 1. Explore the Data Loader
 2. Use the Data Loader to Obtain Batches
 3. Experiment with the CNN Encoder
 4. Implement the RNN Decoder
 
-**Notebook 2**
+**Notebook 2: Training**
 1. Training Setup
 2. Train the Model
 3. Validate the Model
 
-**Notebook 2**
+**Notebook 3: Inference**
 1. Get Data Loader for Test Dataset
 2. Load Trained Models
 3. Finish the Sampler
