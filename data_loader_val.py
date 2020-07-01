@@ -25,7 +25,7 @@ def get_loader_val(transform,
     """Returns the data loader.
     Args:
       transform: Image transform.
-      mode: One of 'train' or 'test'.
+      mode: One of 'train', 'test' or 'val'.
       batch_size: Batch size (if in testing mode, must have batch_size=1).
       vocab_threshold: Minimum word count threshold.
       vocab_file: File containing the vocabulary. 
@@ -38,24 +38,24 @@ def get_loader_val(transform,
       cocoapi_loc: The location of the folder containing the COCO API: https://github.com/cocodataset/cocoapi
     """
     
-    assert mode in ['train', 'test'], "mode must be one of 'train' or 'test'."
+    assert mode in ['train', 'test', 'val'], "mode must be one of 'train' or 'test'."
     if vocab_from_file==False: assert mode=='train', "To generate vocab from captions file, must be in training mode (mode='train')."
 
     # Based on mode (train, val, test), obtain img_folder and annotations_file.
     if mode == 'train':
         if vocab_from_file==True: assert os.path.exists(vocab_file), "vocab_file does not exist.  Change vocab_from_file to False to create vocab_file."
-        # the validation images at filepath '/opt/cocoapi/images/val2014/'
-        # the validation image caption annotation file at filepath '/opt/cocoapi/annotations/captions_val2014.json'.
-        img_folder = os.path.join(cocoapi_loc, 'cocoapi/images/val2014/')
-        annotations_file = os.path.join(cocoapi_loc, 'cocoapi/annotations/captions_val2014.json')
-        # img_folder = os.path.join(cocoapi_loc, 'cocoapi/images/train2014/')
-        # annotations_file = os.path.join(cocoapi_loc, 'cocoapi/annotations/captions_train2014.json')
+        img_folder = os.path.join(cocoapi_loc, 'cocoapi/images/train2014/')
+        annotations_file = os.path.join(cocoapi_loc, 'cocoapi/annotations/captions_train2014.json')
     if mode == 'test':
         assert batch_size==1, "Please change batch_size to 1 if testing your model."
         assert os.path.exists(vocab_file), "Must first generate vocab.pkl from training data."
         assert vocab_from_file==True, "Change vocab_from_file to True."
-        # img_folder = os.path.join(cocoapi_loc, 'cocoapi/images/test2014/')
-        # annotations_file = os.path.join(cocoapi_loc, 'cocoapi/annotations/image_info_test2014.json')
+        img_folder = os.path.join(cocoapi_loc, 'cocoapi/images/test2014/')
+        annotations_file = os.path.join(cocoapi_loc, 'cocoapi/annotations/image_info_test2014.json')
+    if mode == 'val':
+        assert batch_size==1, "Please change batch_size to 1 if validating your model."
+        assert os.path.exists(vocab_file), "Must first generate vocab.pkl from training data."
+        assert vocab_from_file==True, "Change vocab_from_file to True."
         img_folder = os.path.join(cocoapi_loc, 'cocoapi/images/val2014/')
         annotations_file = os.path.join(cocoapi_loc, 'cocoapi/annotations/captions_val2014.json')
 
@@ -106,14 +106,17 @@ class CoCoDataset(data.Dataset):
             self.ids = list(self.coco.anns.keys())
             print('Obtaining caption lengths...')
             all_tokens = [nltk.tokenize.word_tokenize(str(self.coco.anns[self.ids[index]]['caption']).lower()) for index in tqdm(np.arange(len(self.ids)))]
-            self.caption_lengths = [len(token) for token in all_tokens]
+            self.caption_lengths = [len(token) for token in all_tokens]            
+        elif self.mode == 'val':
+            self.coco = COCO(annotations_file)
+            self.ids = list(self.coco.anns.keys())
         else:
             test_info = json.loads(open(annotations_file).read())
             self.paths = [item['file_name'] for item in test_info['images']]
         
     def __getitem__(self, index):
         # obtain image and caption if in training mode
-        if self.mode == 'train':
+        if self.mode in ['train']:
             ann_id = self.ids[index]
             caption = self.coco.anns[ann_id]['caption']
             img_id = self.coco.anns[ann_id]['image_id']
@@ -133,7 +136,21 @@ class CoCoDataset(data.Dataset):
 
             # return pre-processed image and caption tensors
             return image, caption
+        
+        # obtain image if in validation mode
+        elif self.mode in ['val']:            
+            ann_id = self.ids[index]
+            caption = self.coco.anns[ann_id]['caption']
+            img_id = self.coco.anns[ann_id]['image_id']
+            path = self.coco.loadImgs(img_id)[0]['file_name']
 
+            # Convert image to tensor and pre-process using transform
+            PIL_image = Image.open(os.path.join(self.img_folder, path)).convert('RGB')
+            orig_image = np.array(PIL_image)
+            image = self.transform(PIL_image)
+            
+            return orig_image, image, caption
+        
         # obtain image if in test mode
         else:
             path = self.paths[index]
@@ -153,7 +170,7 @@ class CoCoDataset(data.Dataset):
         return indices
 
     def __len__(self):
-        if self.mode == 'train':
+        if self.mode in ["train", 'val']:
             return len(self.ids)
         else:
             return len(self.paths)
