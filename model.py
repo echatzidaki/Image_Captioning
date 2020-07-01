@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from torch.autograd import Variable
 
 
 # https://pytorch.org/docs/master/torchvision/models.html
@@ -18,11 +19,14 @@ import torchvision.models as models
 # mnasnet = models.mnasnet1_0(pretrained=True)
 # torchvision.models.resnet152  https://web.stanford.edu/class/archive/cs/cs224n/cs224n.1194/reports/custom/15721427.pdf
 
+#TODO: beam search, attention
+
 class EncoderCNN(nn.Module):
     def __init__(self, embed_size):
         super(EncoderCNN, self).__init__()
-        #resnet = models.resnet152(pretrained=True)
-        resnet = models.resnet50(pretrained=True)
+        # resnet = models.resnet152(pretrained=True)
+        resnet = models.resnet18(pretrained=True)
+        # resnet = models.resnet50(pretrained=True)
         for param in resnet.parameters():
             param.requires_grad_(False)
         
@@ -46,7 +50,6 @@ class DecoderRNN(nn.Module):
         self.num_layers = num_layers
         self.drop_prob = drop_prob
         
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Define Embedding
         self.embed = nn.Embedding(vocab_size, embed_size)
@@ -65,72 +68,96 @@ class DecoderRNN(nn.Module):
         # Apply logSoftmax 
         self.softmax = nn.LogSoftmax(1)
         
-        # Initialize weights
-        #torch.nn.init.xavier_uniform(self.linear.weight)
-        self.linear.weight.data.uniform_(0.0, 1.0).cuda()
-        self.linear.bias.data.fill_(0).cuda()
-    
-    def w_b_init(self):
-        "Initialize weights: xavier and bias: zero"
-        # if isinstance(layer, nn.Conv2d):
-        #     torch.nn.init.xavier_uniform_(layer.weight).cuda()
-        #     self.layer.bias.data.fill_(0).cuda()
-        torch.nn.init.xavier_uniform_(self.linear.weight).cuda()
-        self.linear.bias.data.fill_(0).cuda()
+        self.w_b_init()
+
+
+    def w_b_init(init_type='kaiming-normal'):
+        # https://pytorch.org/docs/stable/nn.init.html
+        def init_func(m):
+            classname = m.__class__.__name__
+            if (classname.find('Conv') == 0 or classname.find('Linear') == 0) and hasattr(m, 'weight'):
+                if init_type == 'normal':
+                    init.normal(m.weight.data, 0.0, 0.02).cuda()
+                elif init_type == 'uniform':
+                    init.uniform_(m.weight.data, a=0.0, b=1.0).cuda()
+                elif init_type == 'xavier-normal':
+                    init.xavier_normal(m.weight.data, gain=math.sqrt(2)).cuda()
+                elif init_type == 'xavier-uniform':
+                    init.xavier_uniform_(m.weight.data, gain=1.0).cuda()
+                elif init_type == 'kaiming-normal':
+                    init.kaiming_normal(m.weight.data, a=0, mode='fan_in').cuda()
+                elif init_type == 'kaiming-uniform':
+                    init.kaiming_uniform_(m.weight.data, a=0, mode='fan_in').cuda()
+                elif init_type == 'orthogonal':
+                    init.orthogonal(m.weight.data, gain=math.sqrt(2)).cuda()  
+                elif init_type == 'default':
+                    pass
+                else:
+                    assert 0, "Unsupported initialization: {}".format(init_type)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    init.constant(m.bias.data, 0.0)
+            elif (classname.find('Norm') == 0):
+                if hasattr(m, 'weight') and m.weight is not None:
+                    init.constant(m.weight.data, 1.0)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    init.constant(m.bias.data, 0.0)
+        return init_func 
+
             
     def hidden_init(self, n_batch):
         "Initialize hidden  and cell states"
-#         return (torch.zeros(self.n_layers, n_batch, self.hidden_dim), 
-#                torch.zeros(self.n_layers, batch_size, self.hidden_dim))
-        return (torch.zeros(self.n_layers, n_batch, self.hidden_dim).cuda(), 
-               torch.zeros(self.n_layers, batch_size, self.hidden_dim).cuda())
+    #     return (torch.zeros(self.n_layers, n_batch, self.hidden_dim), 
+    #            torch.zeros(self.n_layers, batch_size, self.hidden_dim))
+        states = (
+            Variable(torch.zeros(self.num_layers, n_batch, self.hidden_size), requires_grad=False).cuda(),
+            Variable(torch.zeros(self.num_layers, n_batch, self.hidden_size), requires_grad=False).cuda()
+        )
+#         return (torch.zeros(self.num_layers, n_batch, self.hidden_dim).cuda(), 
+#                torch.zeros(self.num_layers, batch_size, self.hidden_dim).cuda())
+        return states
 
     
-    def forward(self, features, captions):
-        
+    def forward(self, features, captions):        
         
         batch_size = features.size(0)
-        # initialize hidden state (h, c)
-        # h = hidden_init(1)
         
         captions = captions[:,:-1] 
         captions = self.embed(captions)
         
+        self.hidden = self.hidden_init(batch_size) 
+        
         inputs = torch.cat((features.unsqueeze(1), captions), 1)    
         lay_lstm, hidden = self.lstm(inputs)
-        self.hidden = hidden
         
         outputs = self.linear(lay_lstm)
+        outputs = self.softmax(outputs)
                  
         return outputs
 
 
     def sample(self, inputs, states=None, max_len=20):
         " accepts pre-processed image tensor (inputs) and returns predicted sentence (list of tensor ids of length max_len) "
-        
-        if cuda:
-            self.cuda()
-        else:
-            self.cpu()
-                                    
+         
+        self.cuda()
+        batch_size = inputs.shape[0]
+        hidden = self.hidden_init(batch_size)
         # The output
-        sentence = []
-        
-        # 1 dim: the batch_size
-        
-        # initialize hidden state (h, c)
-        h = hidden_init(1)
-        
-        for _ in range(max_len):
-            x, (h, c) = self.lstm(inputs, hc)
-            x = self.linear(x.squeeze(1))
-            x_max = x.max(1)[1]
-            x_item = x_max.cpu().numpy()[0]
-            sentence.append(x_item.item())
+        sentence = []        
+        for ml in range(max_len):
+            # lstm
+            x, hidden = self.lstm(inputs, hidden)
+            # linear
+            x = self.linear(x).squeeze(1)
+            _, x_max = torch.max(x, dim=1)
+            x_item = x_max.cpu().numpy()[0].item()
+            sentence.append(x_item)
             #end token or max length
-            if (max_out == 1 or len(x) >= max_len):
+            if (x_max == 1 or len(sentence) >= max_len):
                 break
                 
-        inputs = self.embed(x_max).unsqueeze(1)
-        
+            inputs = self.embed(x_max)        
+            inputs = inputs.unsqueeze(1)
         return sentence 
+
+           
+
